@@ -703,6 +703,7 @@ Parcial-Final-Comunicaciones/
 **Programa**: Ingeniería en Mecatrónica  
 **Asignatura**: Comunicaciones - Sexto Semestre  
 **Proyecto**: Parcial Final - Diseño de Sistema IoT Agroindustrial  
+**Autor**: Daniel García Araque  
 **Fecha**: Noviembre 2025
 
 ### Objetivos del Proyecto
@@ -762,8 +763,8 @@ Parcial-Final-Comunicaciones/
 
 ## 📞 Contacto y Soporte
 
-**Autor**: Daniel Araque  
-**Email**: daniel.araque@unimilitar.edu.co  
+**Autor**: Daniel García Araque  
+**Email**: est.daniel.garciaa@unimilitar.edu.co  
 **GitHub**: [@DanielAraqueStudios](https://github.com/DanielAraqueStudios)  
 **Repositorio**: [Parcial-Final-Comunicaciones](https://github.com/DanielAraqueStudios/Parcial-Final-Comunicaciones)
 
