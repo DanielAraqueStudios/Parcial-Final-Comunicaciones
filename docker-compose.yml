@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    container_name: agricultura-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://admin:password@postgres:5432/agricultura_iot
+      - MQTT_BROKER=10.0.6.21
+      - MQTT_PORT=8883
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./backend:/app
+      - ./certs:/certs:ro
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: agricultura-postgres
+    environment:
+      - POSTGRES_DB=agricultura_iot
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/postgresql/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: agricultura-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: agricultura-mqtt
+    volumes:
+      - ./mqtt-broker/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./mqtt-broker/data:/mosquitto/data
+      - ./certs:/mosquitto/certs:ro
+    ports:
+      - "1883:1883"
+      - "8883:8883"
+      - "9001:9001"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

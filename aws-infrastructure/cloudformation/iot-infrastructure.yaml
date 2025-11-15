@@ -1,0 +1,354 @@
+# AWS IoT Infrastructure - CloudFormation
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Infraestructura IoT para Agricultura Inteligente'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: 'agricultura-iot'
+  Environment:
+    Type: String
+    Default: 'production'
+    AllowedValues: [production, staging, development]
+
+Resources:
+  # ============================================================
+  # VPC Y NETWORKING
+  # ============================================================
+  
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 172.31.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-vpc'
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.31.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-private-1'
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 172.31.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-private-2'
+
+  # ============================================================
+  # AWS IoT CORE
+  # ============================================================
+
+  IoTPolicy:
+    Type: AWS::IoT::Policy
+    Properties:
+      PolicyName: !Sub '${ProjectName}-device-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'iot:Connect'
+            Resource:
+              - !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:client/${!iot:Connection.Thing.ThingName}'
+          - Effect: Allow
+            Action:
+              - 'iot:Publish'
+            Resource:
+              - !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topic/agricultura/*'
+          - Effect: Allow
+            Action:
+              - 'iot:Subscribe'
+            Resource:
+              - !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topicfilter/agricultura/*/comandos/*'
+          - Effect: Allow
+            Action:
+              - 'iot:Receive'
+            Resource:
+              - !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topic/agricultura/*'
+
+  IoTTopicRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: !Sub '${ProjectName}_sensor_to_lambda'
+      TopicRulePayload:
+        Sql: "SELECT * FROM 'agricultura/+/sensores/+/+'"
+        Actions:
+          - Lambda:
+              FunctionArn: !GetAtt ProcessSensorDataFunction.Arn
+          - DynamoDB:
+              TableName: !Ref SensorTelemetryTable
+              RoleArn: !GetAtt IoTRuleRole.Arn
+              HashKeyField: sensor_id
+              HashKeyValue: '${topic(4)}'
+              RangeKeyField: timestamp
+              RangeKeyValue: '${timestamp()}'
+
+  # ============================================================
+  # RDS POSTGRESQL
+  # ============================================================
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-db-subnet'
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for RDS PostgreSQL
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref AppSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-db-sg'
+
+  PostgresDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub '${ProjectName}-postgres'
+      DBInstanceClass: db.t3.large
+      Engine: postgres
+      EngineVersion: '15.4'
+      MasterUsername: admin
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:password}}'
+      AllocatedStorage: 500
+      StorageType: gp3
+      StorageEncrypted: true
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DBSecurityGroup
+      MultiAZ: true
+      BackupRetentionPeriod: 30
+      PreferredBackupWindow: '03:00-04:00'
+      PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-db'
+
+  DBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${ProjectName}/db/password'
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "admin"}'
+        GenerateStringKey: 'password'
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'
+
+  # ============================================================
+  # DYNAMODB (Telemetría en tiempo real)
+  # ============================================================
+
+  SensorTelemetryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-sensor-telemetry'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: sensor_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: N
+      KeySchema:
+        - AttributeName: sensor_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: ttl
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-telemetry'
+
+  # ============================================================
+  # LAMBDA FUNCTIONS
+  # ============================================================
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:Query'
+                Resource: !GetAtt SensorTelemetryTable.Arn
+
+  ProcessSensorDataFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-process-sensor-data'
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 512
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref SensorTelemetryTable
+          RDS_ENDPOINT: !GetAtt PostgresDB.Endpoint.Address
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          from datetime import datetime
+          
+          dynamodb = boto3.resource('dynamodb')
+          
+          def lambda_handler(event, context):
+              print(f"Received event: {json.dumps(event)}")
+              
+              # Procesar datos del sensor
+              sensor_id = event.get('device_id')
+              readings = event.get('readings', {})
+              
+              # Guardar en DynamoDB
+              table = dynamodb.Table(os.environ['DYNAMODB_TABLE'])
+              table.put_item(
+                  Item={
+                      'sensor_id': sensor_id,
+                      'timestamp': int(datetime.now().timestamp()),
+                      'data': readings,
+                      'ttl': int(datetime.now().timestamp()) + 2592000  # 30 días
+                  }
+              )
+              
+              return {'statusCode': 200}
+
+  # ============================================================
+  # S3 (Almacenamiento archivos)
+  # ============================================================
+
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-data-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ArchiveOldData
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ============================================================
+  # CLOUDWATCH ALARMS
+  # ============================================================
+
+  HighTemperatureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-high-temperature'
+      AlarmDescription: 'Alerta cuando temperatura supera umbral'
+      MetricName: SensorTemperature
+      Namespace: AgriculturaIoT
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 35
+      ComparisonOperator: GreaterThanThreshold
+
+  # ============================================================
+  # IAM ROLES
+  # ============================================================
+
+  IoTRuleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: iot.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: IoTRulePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:PutItem'
+                  - 'lambda:InvokeFunction'
+                Resource: '*'
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for application servers
+      VpcId: !Ref VPC
+
+Outputs:
+  IoTEndpoint:
+    Description: AWS IoT Endpoint
+    Value: !Sub '${AWS::AccountId}.iot.${AWS::Region}.amazonaws.com'
+    Export:
+      Name: !Sub '${ProjectName}-iot-endpoint'
+
+  DBEndpoint:
+    Description: RDS PostgreSQL Endpoint
+    Value: !GetAtt PostgresDB.Endpoint.Address
+    Export:
+      Name: !Sub '${ProjectName}-db-endpoint'
+
+  DynamoDBTable:
+    Description: DynamoDB Table Name
+    Value: !Ref SensorTelemetryTable
+    Export:
+      Name: !Sub '${ProjectName}-dynamodb-table'
+
+  S3Bucket:
+    Description: S3 Data Bucket
+    Value: !Ref DataBucket
+    Export:
+      Name: !Sub '${ProjectName}-s3-bucket'
