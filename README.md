@@ -1,10 +1,38 @@
-# Sistema IoT para Agricultura Inteligente Agroindustrial
+﻿# Sistema IoT para Agricultura Inteligente Agroindustrial
 
 [![Arquitectura](https://img.shields.io/badge/Arquitectura-IoT-green)](./architecture/)
 [![Backend](https://img.shields.io/badge/Backend-FastAPI-blue)](./backend/)
 [![Frontend](https://img.shields.io/badge/Frontend-React-blue)](./frontend/)
 [![Cloud](https://img.shields.io/badge/Cloud-AWS-orange)](./aws-infrastructure/)
 [![Security](https://img.shields.io/badge/Security-TLS%2FVPN-red)](./security/)
+
+---
+
+##  Repositorios Relacionados
+
+Este proyecto forma parte del **Parcial Final de Comunicaciones** que incluye 3 repositorios:
+
+| # | Repositorio | Descripción | Enlace |
+|---|-------------|-------------|--------|
+| **1** | **Parcial-Final-Comunicaciones** |  Caso de Negocio: Agricultura Inteligente (Este repo)<br/>- Arquitectura de red IP<br/>- Subnetting 8 sedes Boyacá/Cundinamarca<br/>- VLANs y segmentación<br/>- Diagramas de red |  **Actual** |
+| **2** | **COMUNICACIONES-IOT-AWS** |  Servidor IoT MQTT Seguro con AWS IoT Core<br/>- BedSide Monitor (BSM_G101)<br/>- Certificados X.509<br/>- Amazon Kinesis + DynamoDB<br/>- LocalStack para desarrollo local | [ Ver Repositorio](https://github.com/DanielAraqueStudios/COMUNICACIONES-IOT-AWS.git) |
+| **3** | **PARCIAL** |  Documentación Técnica Profesional<br/>- Informe IEEE formato LaTeX<br/>- Documentación completa del punto 2<br/>- Evidencias y resultados | [ Ver Repositorio](https://github.com/DanielAraqueStudios/PARCIAL.git) |
+
+###  Estructura del Examen
+
+**Pregunta 1** (Este repositorio): Diseño de infraestructura IoT para agricultura
+- Arquitectura IP, subnetting, VLANs
+- Protocolos de comunicación (LoRa, MQTT, TLS)
+- Edge computing y cloud integration
+- Seguridad y trazabilidad
+
+**Pregunta 2** (Repositorios 2 y 3): Implementación servidor MQTT seguro
+- AWS IoT Core con certificados X.509
+- "Things" con autenticación individual
+- Streaming tiempo real (Kinesis)
+- Persistencia en DynamoDB
+
+---
 
 ## 📋 Descripción del Proyecto
 
